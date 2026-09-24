@@ -10,4 +10,12 @@ If you want to be able to update the server files add `--mount type=bind,source=
 docker run --name gap_server -p 63910:63910 -d --restart=unless_stopped --mount type=bind,source="/root/GAP-Server Files",target=/files gap-server:1.0 
 ```
 
-I uploaded two versions to the docker hub, one serving a built version of v. 1.4.6 as static files: https://hub.docker.com/r/johannesheissler/gap-server/tags
+I uploaded two versions to the docker hub, one serving a built version of Graphicayley as static files: [These Containers on Docker Hub](https://hub.docker.com/r/johannesheissler/gap-server/tags)
+
+To update the served version of Graphicayley, simply run update_dockerfile (no need to do the above - it will pull the gap-server:1.1 from Docker Hub):
+```[bash]
+docker build -f update_dockerfile -t gap-server:1.1-graphicayley1.x.y .
+docker push johannesheissler/gap-server:1.1-graphicayley1.x.y
+```
+
+I currently serve these docker containers on [graphicayley.de](https://graphicayley.de)

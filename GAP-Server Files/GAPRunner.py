@@ -202,6 +202,11 @@ class GAPRunner:
 
 #region Server
 
+def makeIndexHandler(indexFile: Path):
+    async def handler(_: web.Request):
+        return web.FileResponse(indexFile, headers={"Access-Control-Allow-Origin": ACCESS_CONTROL_ORIGIN})
+    return handler
+
 def runServer(port: int):
     async def handle(request: web.Request):
         """ the request must come as text of the form 'texFile,outdir' """
@@ -220,19 +225,46 @@ def runServer(port: int):
 
     async def startup():
         app = web.Application()
-        if (STATIC_PATH / "index.html").is_file():
-            app.add_routes([web.get('/', lambda _: web.FileResponse(STATIC_PATH / "index.html", headers={"Access-Control-Allow-Origin": ACCESS_CONTROL_ORIGIN}))])
-        else : 
-            if REDIRECT_URL is not None:
-                app.add_routes([web.get('/', lambda _: web.HTTPFound(REDIRECT_URL))])
+
+        rootIndexFile = STATIC_PATH / "index.html"
+        rootHandler = makeIndexHandler(rootIndexFile) if rootIndexFile.is_file() else None
+
+        subdirRoutes: list[tuple[str, Path]] = []
+        if STATIC_PATH.is_dir():
+            for subdir in sorted(STATIC_PATH.iterdir()):
+                if not subdir.is_dir():
+                    continue
+                indexFile = subdir / "index.html"
+                if not indexFile.is_file():
+                    continue
+                for route in subdir.name.split(','):
+                    route = route.strip()
+                    if not route:
+                        continue
+                    if route == '_':
+                        # a folder listing '_' as one of its routes serves as the root index, if there is none directly in STATIC_PATH
+                        if rootHandler is None:
+                            rootHandler = makeIndexHandler(indexFile)
+                    else:
+                        subdirRoutes.append((route, indexFile))
+
+        if rootHandler is not None:
+            app.add_routes([web.get('/', rootHandler)])
+        elif REDIRECT_URL is not None:
+            app.add_routes([web.get('/', lambda _: web.HTTPFound(REDIRECT_URL))])
+
         app.add_routes([
             web.get(f'/{ROUTE_OBFUSCATION}', handleGet),
             web.post(f'/{ROUTE_OBFUSCATION}', secureByApiKey(handle)),
             web.get(f'/stopServer{ROUTE_OBFUSCATION}', secureByApiKey(handleStopServer)),
             web.options(f'/{ROUTE_OBFUSCATION}', lambda _: web.Response(headers={"Access-Control-Allow-Origin": ACCESS_CONTROL_ORIGIN, "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type, Access-Control-Allow-Origin"})),
         ])
+
+        for route, indexFile in subdirRoutes:
+            app.add_routes([web.get(f'/{route}', makeIndexHandler(indexFile))])
+
         if STATIC_PATH.is_dir():
-            app.add_routes([web.static('/', '/files/static/')])
+            app.add_routes([web.static('/', STATIC_PATH)])
         return app
 
     web.run_app(startup(), port=port)
