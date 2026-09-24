@@ -1,0 +1,22 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File with Arguments",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "GAP-Server Files/GAPRunner.py",
+            "console": "integratedTerminal",
+            "env": {
+                "STATIC_PATH": "GAP-Server Files/static",
+                "GAP_PATH": "/usr/bin/gap",
+                "PORT": "5000",
+                "GAP_ROUTE": "gap",
+                "API_KEY": "test"
+            }
+        }
+    ]
+}

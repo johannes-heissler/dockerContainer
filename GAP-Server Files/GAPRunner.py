@@ -33,7 +33,7 @@ REDIRECT_URL = os.getenv("REDIRECT_URL", "https://github.com/jeanbellynck/Cayley
 START_LOG = '"start!"'
 HALT_LOG = '"return!"'
 PREPARED_LOG = "?help"
-STARTUP_COMMAND = os.getenv("GAP_PATH", "/home/johannesh/repos/gap/gap")
+STARTUP_COMMAND = os.getenv("GAP_PATH", "/usr/bin/gap")
 # "%appdata%\\GAP\\runtime\\bin\\cygstart %appdata%\\GAP\\runtime\\bin\\bash --login /run-gap.sh" 
 # was too complicated to get it to run on windows, in the same process I started it
 WORKING_DIRECTORY = None # "%appdata%\\GAP\\runtime\\bin"
@@ -202,9 +202,22 @@ class GAPRunner:
 
 #region Server
 
-def makeIndexHandler(indexFile: Path):
-    async def handler(_: web.Request):
-        return web.FileResponse(indexFile, headers={"Access-Control-Allow-Origin": ACCESS_CONTROL_ORIGIN})
+def makeTrailingSlashRedirect(route: str):
+    """ index.html files use relative paths (e.g. Build/Build.loader.js), so they only resolve correctly if the URL ends with a slash """
+    async def handler(request: web.Request):
+        raise web.HTTPPermanentRedirect(f'/{route}/' + (f'?{request.query_string}' if request.query_string else ''))
+    return handler
+
+def makeDirectoryHandler(*directories: Path):
+    """ Serves request.match_info['tail'] from the first of the directories that contains it; the index.html for an empty tail """
+    roots = [d.resolve() for d in directories]
+    async def handler(request: web.Request):
+        tail = request.match_info.get('tail', '') or 'index.html'
+        for root in roots:
+            file = (root / tail).resolve()
+            if file.is_relative_to(root) and file.is_file():
+                return web.FileResponse(file, headers={"Access-Control-Allow-Origin": ACCESS_CONTROL_ORIGIN})
+        raise web.HTTPNotFound()
     return handler
 
 def runServer(port: int):
@@ -227,7 +240,7 @@ def runServer(port: int):
         app = web.Application()
 
         rootIndexFile = STATIC_PATH / "index.html"
-        rootHandler = makeIndexHandler(rootIndexFile) if rootIndexFile.is_file() else None
+        rootDirectory = STATIC_PATH if rootIndexFile.is_file() else None
 
         subdirRoutes: list[tuple[str, Path]] = []
         if STATIC_PATH.is_dir():
@@ -243,14 +256,12 @@ def runServer(port: int):
                         continue
                     if route == '_':
                         # a folder listing '_' as one of its routes serves as the root index, if there is none directly in STATIC_PATH
-                        if rootHandler is None:
-                            rootHandler = makeIndexHandler(indexFile)
+                        if rootDirectory is None:
+                            rootDirectory = subdir
                     else:
-                        subdirRoutes.append((route, indexFile))
+                        subdirRoutes.append((route, subdir))
 
-        if rootHandler is not None:
-            app.add_routes([web.get('/', rootHandler)])
-        elif REDIRECT_URL is not None:
+        if rootDirectory is None and REDIRECT_URL is not None:
             app.add_routes([web.get('/', lambda _: web.HTTPFound(REDIRECT_URL))])
 
         app.add_routes([
@@ -260,11 +271,18 @@ def runServer(port: int):
             web.options(f'/{ROUTE_OBFUSCATION}', lambda _: web.Response(headers={"Access-Control-Allow-Origin": ACCESS_CONTROL_ORIGIN, "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type, Access-Control-Allow-Origin"})),
         ])
 
-        for route, indexFile in subdirRoutes:
-            app.add_routes([web.get(f'/{route}', makeIndexHandler(indexFile))])
+        for route, subdir in subdirRoutes:
+            app.add_routes([
+                web.get(f'/{route}', makeTrailingSlashRedirect(route)),
+                web.get(f'/{route}/{{tail:.*}}', makeDirectoryHandler(subdir)),
+            ])
 
-        if STATIC_PATH.is_dir():
-            app.add_routes([web.static('/', STATIC_PATH)])
+        # catch-all: files of the root index's folder are served at /, falling back to STATIC_PATH itself
+        rootDirectories = [d for d in (rootDirectory, STATIC_PATH) if d is not None and d.is_dir()]
+        if rootDirectories:
+            # without a root index, '/' is the redirect above, so the tail must be non-empty
+            tailPattern = '.*' if rootDirectory is not None else '.+'
+            app.add_routes([web.get(f'/{{tail:{tailPattern}}}', makeDirectoryHandler(*rootDirectories))])
         return app
 
     web.run_app(startup(), port=port)
